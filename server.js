@@ -6,8 +6,10 @@ const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const nodemailer = require('nodemailer');
 const { User, Book, Cart, Order } = require('./models');
+const cors = require('cors');
 
 const app = express();
+app.use(cors());
 app.use(express.json());
 
 // MongoDB / Cosmos DB Connection
@@ -172,6 +174,16 @@ async function sendBillingEmail(userEmail, order) {
     `
   });
 }
+
+// Add Single Custom Book
+app.post('/api/books', async (req, res) => {
+  try {
+    const newBook = await Book.create(req.body);
+    res.status(201).json(newBook);
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
+});
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
