@@ -9,19 +9,33 @@ const { User, Book, Cart, Order } = require('./models');
 const cors = require('cors');
 
 const app = express();
-app.use(cors());
+
+// Trust Azure Reverse Proxy for Secure Cookies
+app.set('trust proxy', 1);
+
+// Configure CORS to allow credentials from the Static Web App
+app.use(cors({
+  origin: 'https://red-bush-0fd114510.5.azurestaticapps.net',
+  credentials: true
+}));
+
 app.use(express.json());
 
-// MongoDB / Cosmos DB Connection
+// MongoDB / Azure Cosmos DB Connection
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log('Successfully connected to Azure Cosmos DB / MongoDB'))
   .catch(err => console.error('Database Connection Error:', err));
 
-// Session Setup
+// Session Setup with Cross-Site Cookie Support
 app.use(session({
   secret: process.env.SESSION_SECRET || 'secret_key',
   resave: false,
-  saveUninitialized: false
+  saveUninitialized: false,
+  cookie: {
+    secure: true,
+    sameSite: 'none',
+    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+  }
 }));
 
 app.use(passport.initialize());
@@ -53,8 +67,12 @@ passport.use(new GoogleStrategy({
 
 passport.serializeUser((user, done) => done(null, user.id));
 passport.deserializeUser(async (id, done) => {
-  const user = await User.findById(id);
-  done(null, user);
+  try {
+    const user = await User.findById(id);
+    done(null, user);
+  } catch (err) {
+    done(err, null);
+  }
 });
 
 // Middleware for Authenticated Routes
@@ -69,9 +87,29 @@ const isAuthenticated = (req, res, next) => {
 app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
 
 app.get('/auth/google/callback',
-  passport.authenticate('google', { failureRedirect: '/login-failed' }),
-  (req, res) => res.json({ message: 'Authentication successful!', user: req.user })
+  passport.authenticate('google', { failureRedirect: 'https://red-bush-0fd114510.5.azurestaticapps.net?login=failed' }),
+  (req, res) => {
+    // Redirect back to React frontend upon successful login
+    res.redirect('https://red-bush-0fd114510.5.azurestaticapps.net');
+  }
 );
+
+// Get Currently Logged-In User Details
+app.get('/api/me', (req, res) => {
+  if (req.isAuthenticated()) {
+    res.json({ user: req.user });
+  } else {
+    res.status(401).json({ message: 'Not authenticated' });
+  }
+});
+
+// Logout Route
+app.get('/auth/logout', (req, res, next) => {
+  req.logout(err => {
+    if (err) return next(err);
+    res.json({ message: 'Logged out successfully' });
+  });
+});
 
 // ----------------------------------------------------
 // API Endpoints: Books, Cart & Checkout
@@ -79,72 +117,98 @@ app.get('/auth/google/callback',
 
 // Fetch Books (Filter by Genre)
 app.get('/api/books', async (req, res) => {
-  const { genre } = req.query;
-  const filter = genre ? { genre } : {};
-  const books = await Book.find(filter);
-  res.json(books);
+  try {
+    const { genre } = req.query;
+    const filter = genre ? { genre } : {};
+    const books = await Book.find(filter);
+    res.json(books);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Add Single Custom Book
+app.post('/api/books', async (req, res) => {
+  try {
+    const newBook = await Book.create(req.body);
+    res.status(201).json(newBook);
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
 });
 
 // Seed Initial Books (Utility Route)
 app.post('/api/books/seed', async (req, res) => {
-  await Book.insertMany([
-    { title: 'Designing Data-Intensive Applications', author: 'Martin Kleppmann', genre: 'Tech', price: 45 },
-    { title: 'The Hobbit', author: 'J.R.R. Tolkien', genre: 'Fantasy', price: 20 },
-    { title: 'Dune', author: 'Frank Herbert', genre: 'Sci-Fi', price: 25 }
-  ]);
-  res.json({ message: 'Sample books added to Database!' });
+  try {
+    await Book.insertMany([
+      { title: 'Designing Data-Intensive Applications', author: 'Martin Kleppmann', genre: 'Tech', price: 45 },
+      { title: 'The Hobbit', author: 'J.R.R. Tolkien', genre: 'Fantasy', price: 20 },
+      { title: 'Dune', author: 'Frank Herbert', genre: 'Sci-Fi', price: 25 }
+    ]);
+    res.json({ message: 'Sample books added to Database!' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
 });
 
 // Add Item to Cart
 app.post('/api/cart', isAuthenticated, async (req, res) => {
-  const { bookId, quantity } = req.body;
-  let cart = await Cart.findOne({ userId: req.user.id });
+  try {
+    const { bookId, quantity } = req.body;
+    let cart = await Cart.findOne({ userId: req.user.id });
 
-  if (!cart) {
-    cart = new Cart({ userId: req.user.id, items: [] });
+    if (!cart) {
+      cart = new Cart({ userId: req.user.id, items: [] });
+    }
+
+    const existingIndex = cart.items.findIndex(item => item.bookId.toString() === bookId);
+    if (existingIndex > -1) {
+      cart.items[existingIndex].quantity += (quantity || 1);
+    } else {
+      cart.items.push({ bookId, quantity: quantity || 1 });
+    }
+
+    await cart.save();
+    res.json({ message: 'Cart updated', cart });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
-
-  const existingIndex = cart.items.findIndex(item => item.bookId.toString() === bookId);
-  if (existingIndex > -1) {
-    cart.items[existingIndex].quantity += (quantity || 1);
-  } else {
-    cart.items.push({ bookId, quantity: quantity || 1 });
-  }
-
-  await cart.save();
-  res.json({ message: 'Cart updated', cart });
 });
 
 // Checkout & Send Billing Email
 app.post('/api/checkout', isAuthenticated, async (req, res) => {
-  const { billingAddress } = req.body;
+  try {
+    const { billingAddress } = req.body;
 
-  const cart = await Cart.findOne({ userId: req.user.id }).populate('items.bookId');
-  if (!cart || cart.items.length === 0) {
-    return res.status(400).json({ message: 'Cart is empty' });
+    const cart = await Cart.findOne({ userId: req.user.id }).populate('items.bookId');
+    if (!cart || cart.items.length === 0) {
+      return res.status(400).json({ message: 'Cart is empty' });
+    }
+
+    let totalAmount = 0;
+    const orderItems = cart.items.map(item => {
+      const cost = item.bookId.price * item.quantity;
+      totalAmount += cost;
+      return { title: item.bookId.title, price: item.bookId.price, quantity: item.quantity, subtotal: cost };
+    });
+
+    const order = await Order.create({
+      userId: req.user.id,
+      items: orderItems,
+      totalAmount,
+      billingAddress
+    });
+
+    cart.items = [];
+    await cart.save();
+
+    // Send Order Billing Details Email
+    await sendBillingEmail(req.user.email, order);
+
+    res.json({ message: 'Checkout successful! Invoice sent to registered email.', orderId: order._id });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
-
-  let totalAmount = 0;
-  const orderItems = cart.items.map(item => {
-    const cost = item.bookId.price * item.quantity;
-    totalAmount += cost;
-    return { title: item.bookId.title, price: item.bookId.price, quantity: item.quantity, subtotal: cost };
-  });
-
-  const order = await Order.create({
-    userId: req.user.id,
-    items: orderItems,
-    totalAmount,
-    billingAddress
-  });
-
-  cart.items = [];
-  await cart.save();
-
-  // Send Order Billing Details Email
-  await sendBillingEmail(req.user.email, order);
-
-  res.json({ message: 'Checkout successful! Invoice sent to registered email.', orderId: order._id });
 });
 
 // Helper Function: Nodemailer Email Dispatch
@@ -174,16 +238,6 @@ async function sendBillingEmail(userEmail, order) {
     `
   });
 }
-
-// Add Single Custom Book
-app.post('/api/books', async (req, res) => {
-  try {
-    const newBook = await Book.create(req.body);
-    res.status(201).json(newBook);
-  } catch (err) {
-    res.status(400).json({ message: err.message });
-  }
-});
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
