@@ -215,11 +215,18 @@ app.post('/api/checkout', isAuthenticated, async (req, res) => {
 async function sendBillingEmail(userEmail, order) {
 console.log("DEBUG SMTP_USER:", process.env.SMTP_USER);
 console.log("DEBUG SMTP_PASS Length:", process.env.SMTP_PASS ? process.env.SMTP_PASS.length : 0);
-const transporter = nodemailer.createTransport({
+// Sanitize environment values explicitly
+  const rawUser = process.env.SMTP_USER || 'rk00828431@gmail.com';
+  const rawPass = process.env.SMTP_PASS || 'jbjjuqezrvrpddhv';
+
+  const smtpUser = rawUser.replace(/['"\s]/g, '').trim();
+  const smtpPass = rawPass.replace(/['"\s]/g, '').trim();
+
+  const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
-      user: (process.env.SMTP_USER || 'rk00828431@gmail.com').trim(),
-      pass: (process.env.SMTP_PASS || 'jbjjuqezrvrpddhv').trim()
+      user: smtpUser,
+      pass: smtpPass
     },
     tls: {
       rejectUnauthorized: false
