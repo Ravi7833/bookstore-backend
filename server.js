@@ -213,6 +213,8 @@ app.post('/api/checkout', isAuthenticated, async (req, res) => {
 
 // Helper Function: Nodemailer Email Dispatch
 async function sendBillingEmail(userEmail, order) {
+console.log("DEBUG SMTP_USER:", process.env.SMTP_USER);
+console.log("DEBUG SMTP_PASS Length:", process.env.SMTP_PASS ? process.env.SMTP_PASS.length : 0);
 const transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST || 'smtp.gmail.com',
     port: Number(process.env.SMTP_PORT) || 587,
