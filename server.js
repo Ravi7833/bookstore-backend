@@ -214,13 +214,18 @@ app.post('/api/checkout', isAuthenticated, async (req, res) => {
 // Helper Function: Nodemailer Email Dispatch
 async function sendBillingEmail(userEmail, order) {
 const transporter = nodemailer.createTransport({
-    service: 'gmail',
+    host: process.env.SMTP_HOST || 'smtp.gmail.com',
+    port: Number(process.env.SMTP_PORT) || 587,
+    secure: false,
     auth: {
-      user: 'rk00828431@gmail.com',
-      pass: 'jbjjuqezrvrpddhv' // exact 16-character App Password without spaces
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS
+    },
+    tls: {
+      rejectUnauthorized: false
     }
   });
-
+  
   const itemsHtml = order.items.map(i => `<li><b>${i.title}</b> - ${i.quantity} x $${i.price} = $${i.subtotal}</li>`).join('');
 
   await transporter.sendMail({
