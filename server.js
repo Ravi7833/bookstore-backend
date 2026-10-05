@@ -236,7 +236,7 @@ console.log("DEBUG SMTP_PASS Length:", process.env.SMTP_PASS ? process.env.SMTP_
   const itemsHtml = order.items.map(i => `<li><b>${i.title}</b> - ${i.quantity} x $${i.price} = $${i.subtotal}</li>`).join('');
 
   await transporter.sendMail({
-    from: `"Bookstore Express" <${process.env.SMTP_USER}>`,
+    from: `"Bookstore Express" <${smtpUser}>`,
     to: userEmail,
     subject: `Order Invoice #${order._id}`,
     html: `
