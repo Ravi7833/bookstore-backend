@@ -216,12 +216,10 @@ async function sendBillingEmail(userEmail, order) {
 console.log("DEBUG SMTP_USER:", process.env.SMTP_USER);
 console.log("DEBUG SMTP_PASS Length:", process.env.SMTP_PASS ? process.env.SMTP_PASS.length : 0);
 const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST || 'smtp.gmail.com',
-    port: Number(process.env.SMTP_PORT) || 587,
-    secure: false,
+    service: 'gmail',
     auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS
+      user: (process.env.SMTP_USER || 'rk00828431@gmail.com').trim(),
+      pass: (process.env.SMTP_PASS || 'jbjjuqezrvrpddhv').trim()
     },
     tls: {
       rejectUnauthorized: false
